@@ -27,6 +27,16 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.http.util.TextUtils;
 import org.asamk.Signal;
+import org.asamk.signal.storage.contacts.ContactInfo;
+import org.asamk.signal.storage.contacts.JsonContactsStore;
+import org.asamk.signal.storage.groups.GroupInfo;
+import org.asamk.signal.storage.groups.JsonGroupStore;
+import org.asamk.signal.storage.protocol.JsonIdentityKeyStore;
+import org.asamk.signal.storage.protocol.JsonSignalProtocolStore;
+import org.asamk.signal.storage.threads.JsonThreadStore;
+import org.asamk.signal.storage.threads.ThreadInfo;
+import org.asamk.signal.util.Base64;
+import org.asamk.signal.util.Util;
 import org.whispersystems.libsignal.*;
 import org.whispersystems.libsignal.ecc.Curve;
 import org.whispersystems.libsignal.ecc.ECKeyPair;
@@ -357,7 +367,7 @@ class Manager implements Signal {
     }
 
     public void updateAccountAttributes() throws IOException {
-        accountManager.setAccountAttributes(signalingKey, signalProtocolStore.getLocalRegistrationId(), false, false,true);
+        accountManager.setAccountAttributes(signalingKey, signalProtocolStore.getLocalRegistrationId(), false, false, true);
     }
 
     public void unregister() throws IOException {
@@ -507,7 +517,7 @@ class Manager implements Signal {
     public void verifyAccount(String verificationCode) throws IOException {
         verificationCode = verificationCode.replace("-", "");
         signalingKey = Util.getSecret(52);
-        accountManager.verifyAccountWithCode(verificationCode, signalingKey, signalProtocolStore.getLocalRegistrationId(), false, false,true);
+        accountManager.verifyAccountWithCode(verificationCode, signalingKey, signalProtocolStore.getLocalRegistrationId(), false, false, true);
 
         //accountManager.setGcmId(Optional.of(GoogleCloudMessaging.getInstance(this).register(REGISTRATION_ID)));
         registered = true;
@@ -579,6 +589,10 @@ class Manager implements Signal {
             }
         }
         throw new NotAGroupMemberException(groupId, g.name);
+    }
+
+    public List<GroupInfo> getGroups() {
+        return groupStore.getGroups();
     }
 
     @Override
@@ -1528,11 +1542,11 @@ class Manager implements Signal {
             return false;
         }
         for (JsonIdentityKeyStore.Identity id : ids) {
-            if (!Arrays.equals(id.identityKey.serialize(), fingerprint)) {
+            if (!Arrays.equals(id.getIdentityKey().serialize(), fingerprint)) {
                 continue;
             }
 
-            signalProtocolStore.saveIdentity(name, id.identityKey, TrustLevel.TRUSTED_VERIFIED);
+            signalProtocolStore.saveIdentity(name, id.getIdentityKey(), TrustLevel.TRUSTED_VERIFIED);
             save();
             return true;
         }
@@ -1551,11 +1565,11 @@ class Manager implements Signal {
             return false;
         }
         for (JsonIdentityKeyStore.Identity id : ids) {
-            if (!safetyNumber.equals(computeSafetyNumber(name, id.identityKey))) {
+            if (!safetyNumber.equals(computeSafetyNumber(name, id.getIdentityKey()))) {
                 continue;
             }
 
-            signalProtocolStore.saveIdentity(name, id.identityKey, TrustLevel.TRUSTED_VERIFIED);
+            signalProtocolStore.saveIdentity(name, id.getIdentityKey(), TrustLevel.TRUSTED_VERIFIED);
             save();
             return true;
         }
@@ -1573,8 +1587,8 @@ class Manager implements Signal {
             return false;
         }
         for (JsonIdentityKeyStore.Identity id : ids) {
-            if (id.trustLevel == TrustLevel.UNTRUSTED) {
-                signalProtocolStore.saveIdentity(name, id.identityKey, TrustLevel.TRUSTED_UNVERIFIED);
+            if (id.getTrustLevel() == TrustLevel.UNTRUSTED) {
+                signalProtocolStore.saveIdentity(name, id.getIdentityKey(), TrustLevel.TRUSTED_UNVERIFIED);
             }
         }
         save();

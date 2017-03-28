@@ -1,4 +1,4 @@
-package org.asamk.signal;
+package org.asamk.signal.storage.groups;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonGenerator;
@@ -6,6 +6,7 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.*;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import org.asamk.signal.util.Base64;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -23,16 +24,16 @@ public class JsonGroupStore {
 
     private static final ObjectMapper jsonProcessor = new ObjectMapper();
 
-    void updateGroup(GroupInfo group) {
+    public void updateGroup(GroupInfo group) {
         groups.put(Base64.encodeBytes(group.groupId), group);
     }
 
-    GroupInfo getGroup(byte[] groupId) {
+    public GroupInfo getGroup(byte[] groupId) {
         GroupInfo g = groups.get(Base64.encodeBytes(groupId));
         return g;
     }
 
-    List<GroupInfo> getGroups() {
+    public List<GroupInfo> getGroups() {
         return new ArrayList<>(groups.values());
     }
 

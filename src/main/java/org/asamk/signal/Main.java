@@ -21,6 +21,11 @@ import net.sourceforge.argparse4j.impl.Arguments;
 import net.sourceforge.argparse4j.inf.*;
 import org.apache.http.util.TextUtils;
 import org.asamk.Signal;
+import org.asamk.signal.storage.contacts.ContactInfo;
+import org.asamk.signal.storage.groups.GroupInfo;
+import org.asamk.signal.storage.protocol.JsonIdentityKeyStore;
+import org.asamk.signal.util.Base64;
+import org.asamk.signal.util.Hex;
 import org.freedesktop.dbus.DBusConnection;
 import org.freedesktop.dbus.DBusSigHandler;
 import org.freedesktop.dbus.exceptions.DBusException;
@@ -492,6 +497,23 @@ public class Main {
                     }
 
                     break;
+                case "listGroups":
+                    if (dBusConn != null) {
+                        System.err.println("listGroups is not yet implemented via dbus");
+                        return 1;
+                    }
+                    if (!m.isRegistered()) {
+                        System.err.println("User is not registered.");
+                        return 1;
+                    }
+
+                    List<GroupInfo> groups = m.getGroups();
+                    boolean detailed = ns.getBoolean("detailed");
+
+                    for (GroupInfo group : groups) {
+                        printGroup(group, detailed);
+                    }
+                    break;
                 case "listIdentities":
                     if (dBusConn != null) {
                         System.err.println("listIdentities is not yet implemented via dbus");
@@ -618,9 +640,19 @@ public class Main {
     }
 
     private static void printIdentityFingerprint(Manager m, String theirUsername, JsonIdentityKeyStore.Identity theirId) {
-        String digits = formatSafetyNumber(m.computeSafetyNumber(theirUsername, theirId.identityKey));
+        String digits = formatSafetyNumber(m.computeSafetyNumber(theirUsername, theirId.getIdentityKey()));
         System.out.println(String.format("%s: %s Added: %s Fingerprint: %s Safety Number: %s", theirUsername,
-                theirId.trustLevel, theirId.added, Hex.toStringCondensed(theirId.getFingerprint()), digits));
+                theirId.getTrustLevel(), theirId.getDateAdded(), Hex.toStringCondensed(theirId.getFingerprint()), digits));
+    }
+
+    private static void printGroup(GroupInfo group, boolean detailed) {
+        if (detailed) {
+            System.out.println(String.format("Id: %s Name: %s  Active: %s Members: %s",
+                    Base64.encodeBytes(group.groupId), group.name, group.active, group.members));
+        } else {
+            System.out.println(String.format("Id: %s Name: %s  Active: %s", Base64.encodeBytes(group.groupId),
+                    group.name, group.active));
+        }
     }
 
     private static String formatSafetyNumber(String digits) {
@@ -751,6 +783,11 @@ public class Main {
         parserUpdateGroup.addArgument("-m", "--member")
                 .nargs("*")
                 .help("Specify one or more members to add to the group");
+
+        Subparser parserListGroups = subparsers.addParser("listGroups");
+        parserListGroups.addArgument("-d", "--detailed").action(Arguments.storeTrue())
+                .help("List members of each group");
+        parserListGroups.help("List group name and ids");
 
         Subparser parserListIdentities = subparsers.addParser("listIdentities");
         parserListIdentities.addArgument("-n", "--number")
