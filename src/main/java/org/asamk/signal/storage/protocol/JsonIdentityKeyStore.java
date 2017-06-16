@@ -5,12 +5,12 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.*;
 import org.asamk.signal.TrustLevel;
-import org.asamk.signal.util.Base64;
 import org.whispersystems.libsignal.IdentityKey;
 import org.whispersystems.libsignal.IdentityKeyPair;
 import org.whispersystems.libsignal.InvalidKeyException;
 import org.whispersystems.libsignal.SignalProtocolAddress;
 import org.whispersystems.libsignal.state.IdentityKeyStore;
+import org.whispersystems.signalservice.internal.util.Base64;
 
 import java.io.IOException;
 import java.util.*;
@@ -39,8 +39,8 @@ public class JsonIdentityKeyStore implements IdentityKeyStore {
     }
 
     @Override
-    public void saveIdentity(SignalProtocolAddress address, IdentityKey identityKey) {
-        saveIdentity(address.getName(), identityKey, TrustLevel.TRUSTED_UNVERIFIED, null);
+    public boolean saveIdentity(SignalProtocolAddress address, IdentityKey identityKey) {
+        return saveIdentity(address.getName(), identityKey, TrustLevel.TRUSTED_UNVERIFIED, null);
     }
 
     /**
@@ -51,7 +51,7 @@ public class JsonIdentityKeyStore implements IdentityKeyStore {
      * @param trustLevel
      * @param added       Added timestamp, if null and the key is newly added, the current time is used.
      */
-    public void saveIdentity(String name, IdentityKey identityKey, TrustLevel trustLevel, Date added) {
+    public boolean saveIdentity(String name, IdentityKey identityKey, TrustLevel trustLevel, Date added) {
         List<Identity> identities = trustedKeys.get(name);
         if (identities == null) {
             identities = new ArrayList<>();
@@ -67,14 +67,16 @@ public class JsonIdentityKeyStore implements IdentityKeyStore {
                 if (added != null) {
                     id.added = added;
                 }
-                return;
+                return true;
             }
         }
         identities.add(new Identity(identityKey, trustLevel, added != null ? added : new Date()));
+        return false;
     }
 
     @Override
-    public boolean isTrustedIdentity(SignalProtocolAddress address, IdentityKey identityKey) {
+    public boolean isTrustedIdentity(SignalProtocolAddress address, IdentityKey identityKey, Direction direction) {
+        // TODO implement possibility for different handling of incoming/outgoing trust decisions
         List<Identity> identities = trustedKeys.get(address.getName());
         if (identities == null) {
             // Trust on first use
