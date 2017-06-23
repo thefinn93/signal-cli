@@ -1,21 +1,26 @@
 #!/usr/bin/perl
 
-## PERL event loop driven interface for signal-cli
+## PERL event loop (EV) driven interface for signal-cli
 
-#  Copyright (C) 2017 Carl Bingel
-# 
-#  This program is free software: you can redistribute it and/or modify
-#  it under the terms of the GNU General Public License as published by
-#  the Free Software Foundation, either version 3 of the License, or
-#  (at your option) any later version.
-# 
-#  This program is distributed in the hope that it will be useful,
-#  but WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#  GNU General Public License for more details.
-# 
-#  You should have received a copy of the GNU General Public License
-#  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Non standard module dependencies: 
+#	EV
+
+# /**
+#  * Copyright (C) 2017 Carl Bingel
+#  *
+#  * This program is free software: you can redistribute it and/or modify
+#  * it under the terms of the GNU General Public License as published by
+#  * the Free Software Foundation, either version 3 of the License, or
+#  * (at your option) any later version.
+#  *
+#  * This program is distributed in the hope that it will be useful,
+#  * but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  * GNU General Public License for more details.
+#  *
+#  * You should have received a copy of the GNU General Public License
+#  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#  */
 
 package SignalCLI;
 
@@ -32,6 +37,7 @@ use Data::Dumper;
 ##		signal_cli_executable (Optional) Path to signal-cli executable, default to current build path (../build/install/signal-cli/bin/signal-cli) TODO: fix this to better default
 ##		ev_loop				(Optional) EV loop object, defaulting to "default event loop"
 ##		debug 				(Optional) Turn on debug logging (to stderr)
+##		debug_io			(Optional) Dump all incoming/outgoing JSON data structures
 ##
 sub new {
 	my( $class, %opts) = @_;
@@ -44,6 +50,7 @@ sub new {
 		exit(1);
 	}
 	$self->{'debug'} = $opts{'debug'};
+	$self->{'debug_io'} = $opts{'debug_io'};
 
 	## Default event handlers
 	$self->{'cblist'}->{'message'} = 
@@ -67,6 +74,10 @@ sub new {
 		$self->{'last_alive'} = localtime();
 	};
 	$self->{'cblist'}->{'jsonevtloop_exit'} = sub {
+	};
+	$self->{'cblist'}->{'groupInfo'} = sub {
+		my( $request) = @_;
+		$self->handle_groupInfo($request);
 	};
 
 
@@ -97,19 +108,12 @@ sub new {
 		#my $line;
 		chomp($line);
 		return if( $line eq "");
-		print STDERR "DEBUG(JSON-IN): ".$line."\n" if( $self->{'debug'});
+		print STDERR "DEBUG(JSON-IN): ".$line."\n" if( $self->{'debug_io'});
 		if( $line ne "") {
 			my $msg = decode_json($line);
 			#my $msg = from_json($line);
 			if( $msg) { 
-				print STDERR "DEBUG(JSON-Dump): ".Dumper($msg)."\n" if( $self->{'debug'});
-				if( exists $self->{'cblist'}->{$msg->{'type'}}) {
-					## call on callback handler for this message type
-					print STDERR "DEBUG: Calling callback for message type '".$msg->{'type'}."'\n" if( $self->{'debug'});
-					&{$self->{'cblist'}->{$msg->{'type'}}}($msg);
-				} else {
-					print STDERR "DEBUG: No callback defined for message type '".$msg->{'type'}."'\n" if( $self->{'debug'});					
-				}
+				$self->handle_incoming($msg);
 			}
 		} else {
 			print STDERR "DEBUG(JSON-IN): Empty string received\n";
@@ -134,14 +138,6 @@ sub new {
 		exit($exit_value);
 	});
 
-	## Dummy test, exit after 10 seconds
-	#$self->{'timer1'} = $self->{'ev_loop'}->timer( 10, 0, sub {
-	#	my( $w, $revents) = @_;
-	#	#print { $self->{'signal_cli_stdin'} } "{\"type\":\"exit\"}\n";
-	#	print STDERR "timer1\n";
-	#	$self->submit_request( { 'type' => 'exit' } );
-	#});
-
 	return $self;
 }
 
@@ -154,38 +150,139 @@ sub EV {
 sub submit_request {
 	my( $self, $request) = @_;
 	my $json = encode_json($request);
-	print STDERR "DEBUG(JSON-OUT): ".$json."\n" if( $self->{'debug'});
+	print STDERR "DEBUG(JSON-OUT): ".$json."\n" if( $self->{'debug_io'});
 	print {$self->{'signal_cli_stdin'}} $json."\n";
+}
+
+## EXAMPLES of incoming messages
+
+# direct message
+# {
+#   'type' => 'message',
+#   'envelope' => {
+#                   'timestampISO' => '2017-06-20T13:26:06.829Z',
+#                   'callMessage' => undef,
+#                   'isReceipt' => bless( do{\(my $o = 0)}, 'JSON::XS::Boolean' ),
+#                   'syncMessage' => undef,
+#                   'sourceDevice' => 1,
+#                   'timestamp' => '1497965166829',
+#                   'dataMessage' => {
+#                                      'message' => 'Test ',
+#                                      'attachments' => [],
+#                                      'expiresInSeconds' => 0,
+#                                      'timestamp' => '1497965166829',
+#                                      'groupInfo' => undef
+#                                    },
+#                   'relay' => undef,
+#                   'source' => '+1234'
+#                 }
+# };
+
+# group message
+# {
+# 	'envelope' => {
+# 	              'relay' => undef,
+# 	              'callMessage' => undef,
+# 	              'sourceDevice' => 1,
+# 	              'timestamp' => '1497966451171',
+# 	              'syncMessage' => undef,
+# 	              'dataMessage' => {
+# 	                                 'expiresInSeconds' => 86400,
+# 	                                 'attachments' => [],
+# 	                                 'message' => 'Grupp',
+# 	                                 'timestamp' => '1497966451171',
+# 	                                 'groupInfo' => {
+# 	                                                  'name' => 'testgruppen testabbet w',
+# 	                                                  'members' => undef,
+# 	                                                  'groupId' => 'hyo+GHM6IlVAxab348n6kQ==',
+# 	                                                  'type' => 'DELIVER'
+# 	                                                }
+# 	                               },
+# 	              'timestampISO' => '2017-06-20T13:47:31.171Z',
+# 	              'source' => '+1234',
+# 	              'isReceipt' => bless( do{\(my $o = 0)}, 'JSON::XS::Boolean' )
+# 	            },
+# 	'type' => 'message'
+# };
+
+# receipt
+# {
+#   'envelope' => {
+#                   'isReceipt' => bless( do{\(my $o = 1)}, 'JSON::XS::Boolean' ),
+#                   'sourceDevice' => 3,
+#                   'source' => '+1234',
+#                   'relay' => undef,
+#                   'timestampISO' => '2017-06-20T13:38:32.617Z',
+#                   'timestamp' => '1497965912617',
+#                   'callMessage' => undef,
+#                   'syncMessage' => undef,
+#                   'dataMessage' => undef
+#                 },
+#   'type' => 'message'
+# };
+
+# groupInfo
+# {
+#   'type' => 'message',
+#   'envelope' => {
+#       'timestampISO' => '2017-06-20T15:35:21.091Z',
+#       'timestamp' => '1497972921091',
+#       'sourceDevice' => 1,
+#       'source' => '+1234',
+#       'dataMessage' => {
+#                          'message' => '',
+#                          'attachments' => [],
+#                          'expiresInSeconds' => 0,
+#                          'groupInfo' => {
+#                                           'name' => 'testgruppen testabbet',
+#                                           'groupId' => 'hyo+GHM6IlVAxab348n6kQ==',
+#                                           'members' => [
+#                                                          '+1234',
+#                                                          '+2345'
+#                                                        ],
+#                                           'type' => 'UPDATE'
+#                                         },
+#                          'timestamp' => '1497972921091'
+#                        },
+#       'relay' => undef,
+#       'callMessage' => undef,
+#       'isReceipt' => bless( do{\(my $o = 0)}, 'JSON::XS::Boolean' ),
+#       'syncMessage' => undef
+#     }
+# };
+
+
+sub handle_incoming {
+	my( $self, $msg) = @_;
+
+	print STDERR "DEBUG(JSON-Parsed Dump): ".Dumper($msg)."\n" if( $self->{'debug_io'});
+	
+	##
+	## Determine message type and refine event to: message, groupMessage, receipt, groupInfo
+	##
+	if( $msg->{'type'} eq "message" && exists $msg->{'envelope'}->{'dataMessage'} && $msg->{'envelope'}->{'dataMessage'}->{'groupInfo'} && $msg->{'envelope'}->{'dataMessage'}->{'groupInfo'}->{'type'} eq "UPDATE") {
+		$msg->{'type'} = "groupInfo";
+	} elsif( $msg->{'type'} eq "message" && exists $msg->{'envelope'}->{'dataMessage'} && $msg->{'envelope'}->{'dataMessage'}->{'groupInfo'}) {
+		$msg->{'type'} = "groupMessage";
+	} elsif( $msg->{'type'} eq "message" && $msg->{'envelope'}->{'isReceipt'}) {
+		$msg->{'type'} = "receipt";
+	}
+	print STDERR "DEBUG: msg->{'type'}: ".$msg->{'type'}."\n" if( $self->{'debug'});
+
+	if( exists $self->{'cblist'}->{$msg->{'type'}}) {
+		## call on callback handler for this message type
+		print STDERR "DEBUG: Calling callback for message type '".$msg->{'type'}."'\n" if( $self->{'debug'});
+		&{$self->{'cblist'}->{$msg->{'type'}}}($msg);
+	} else {
+		print STDERR "DEBUG: No callback defined for message type '".$msg->{'type'}."'\n" if( $self->{'debug'});					
+	}
+
+
 }
 
 sub handle_incoming_message {
 	my( $self, $request) = @_;
-
-# direct message
-# 	{
-#      'timestampEpoch' => '1497428054448',
-#      'type' => 'message',
-#      'senderSourceDevice' => 1,
-#      'timestamp' => '2017-06-14T08:14:14.448Z',
-#      'senderNumber' => '+1234',
-#      'messageBody' => 'Testing'
-#    };
-
-# group message
-# 	{
-#      'timestamp' => '2017-06-14T08:16:06.555Z',
-#      'timestampEpoch' => '1497428166555',
-#      'type' => 'groupMessage',
-#      'senderSourceDevice' => 1,
-#      'groupName' => 'testgruppen testabbet w',
-#      'messageBody' => 'Gunnar ',
-#      'senderNumber' => '+1234',
-#      'groupMessageExpireTime' => '1800',
-#      'groupId' => 'hyo+GHM6IlVAxab348n6kQ=='
-#    };
-
-
-	print STDERR "SignalCLI::handle_incoming_message: ".Dumper($request)."\n" if( $self->{'debug'});
+	print STDERR "SignalCLI::handle_incoming_message default_handler: ".Dumper($request)."\n" if( $self->{'debug'});
 }
 
 sub handle_error {
@@ -210,25 +307,25 @@ sub handle_result {
 
 sub handle_receipt {
 	my($self, $request) = @_;
-	# {
-	#          'timestamp' => '2017-06-14T07:51:42.837Z',
-	#          'type' => 'receipt',
-	#          'timestampEpoch' => '1497426702837',
-	#          'senderSourceDevice' => 1,
-	#          'senderNumber' => '+1234'
-	# };
-	print STDERR "SignalCLI::handle_receipt senderNumber='".$request->{'senderNumber'}."', timestamp='".$request->{'timestamp'}."'\n" if( $self->{'debug'});
-
+	print STDERR "SignalCLI::handle_receipt senderNumber='".$request->{'envelope'}->{'source'}."', timestamp='".$request->{'envelope'}->{'timestampISO'}."'\n" if( $self->{'debug'});
 	## TODO: since we don't have a message ID for the message sent, we can not map receipts received to an actual sent message which would be highly conveniant
 	##	underlying shortcoming of signal-cli and I haven't had the time to figure out how that works (yet) //Kalle
+}
+
+sub handle_groupInfo {
+	my( $self, $r) = @_;
+	if( $self->{'debug'}) {
+		my $gi = $r->{'envelope'}->{'dataMessage'}->{'groupInfo'};
+		print STDERR "SignalCLI::handle_groupInfo groupId='".$gi->{'groupId'}."', groupName='".$gi->{'name'}."', members: [".join(",", @{$gi->{'members'}})."]\n";
+	}
 }
 
 sub reply {
 	my( $self, $request, $attachments_aref, $message_body, $on_success, $on_error) = @_;
 	if( $request->{'type'} eq "message") {
-		$self->send_message( $request->{'senderNumber'}, undef, $attachments_aref, $message_body, $on_success, $on_error);
+		$self->send_message( $request->{'envelope'}->{'source'}, undef, $attachments_aref, $message_body, $on_success, $on_error);
 	} elsif( $request->{'type'} eq "groupMessage") {
-		$self->send_message( undef, $request->{'groupId'}, $attachments_aref, $message_body, $on_success, $on_error);
+		$self->send_message( undef, $request->{'envelope'}->{'dataMessage'}->{'groupInfo'}->{'groupId'}, $attachments_aref, $message_body, $on_success, $on_error);
 	}
 }
 
@@ -237,8 +334,6 @@ sub reply {
 ##
 sub send_message {
 	my( $self, $recipient_number, $recipient_groupID, $attachments_aref, $message_body, $on_success, $on_error) = @_;
-	# {"type":"send","recipientNumber":"+12345","messageBody":"Kalle","id": "12345678"}
-	# {"type":"send","recipientGroupId":"hyo+GHM6IlVAxab348n6kQ\u003d\u003d","messageBody":"Kalle","id": "12345678"}	
 	my $trans_id = $self->generate_transaction_id();
 	my $r = { 'type' => 'send', id => $trans_id, 'messageBody' => $message_body };
 	if( defined $recipient_number) {
@@ -282,13 +377,13 @@ sub exit {
 ##			jsonevtloop_start	Called when signal-cli is loaded and ready for action (it's java so startup time needs to be considered! ;-)
 ##			jsonevtloop_exit	Called when signal-cli is exiting
 ##			result
-##			message
-##			groupMessage
-##			receipt
-##			groupInfo
 ##	
-##		Event handlers for refined SignalCLI events
+##		Event handlers for SignalCLI refined events
 ##			cleanup			Called when signal-cli has been terminated and perl program is about to be exited
+##			message 		Called on direct message reception
+##			groupMessage 	Called on group message reception
+##			groupInfo		Called on group info update
+##			receipt 		Called when a message receipt is received
 ##			
 ##
 sub on {
@@ -308,7 +403,7 @@ sub on_timer {
 }
 
 
-
+## start event loop
 sub run {
 	my( $self) = @_;
 	$self->{'ev_loop'}->run();
