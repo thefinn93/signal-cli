@@ -7,8 +7,9 @@ build:
   script:
     - ./gradlew build
     - ./gradlew installDist
-    - cp -r build/install/signal-cli signal-cli/
+    - cp -r build/install/signal-cli/lib build/install/signal-cli/bin .
   artifacts:
     paths:
-      - signal-cli
+      - lib
+      - bin
     expire_in: 1 week
