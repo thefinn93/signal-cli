@@ -5,4 +5,7 @@ build:
   script:
     - ./gradlew build
     - ./gradlew installDist
-    - ./gradlew distTar
+  artifacts:
+    paths:
+      - build/install/signal-cli
+    expire_in: 1 week
