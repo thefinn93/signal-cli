@@ -1,6 +1,9 @@
 image: java:8-jdk
 build:
   stage: build
+  cache:
+    paths:
+      - /root/.gradle
   script:
     - ./gradlew build
     - ./gradlew installDist
