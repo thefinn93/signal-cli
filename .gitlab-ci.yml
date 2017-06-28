@@ -1,5 +1,4 @@
-before_script:
-  - apt-get update -qq && apt-get install -y -qq openjdk-8-jdk
+image: java:8-jdk
 build:
   stage: build
   script:
