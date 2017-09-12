@@ -1,0 +1,15 @@
+image: java:8-jdk
+build:
+  stage: build
+  cache:
+    paths:
+      - /root/.gradle
+  script:
+    - ./gradlew build
+    - ./gradlew installDist
+    - cp -r build/install/signal-cli/lib build/install/signal-cli/bin .
+  artifacts:
+    paths:
+      - lib
+      - bin
+    expire_in: 1 week
