@@ -397,6 +397,13 @@ public class Main {
                                     System.out.println();
                                 }
                             });
+                            dBusConn.addSigHandler(Signal.ReceiptReceived.class, new DBusSigHandler<Signal.ReceiptReceived>() {
+                                @Override
+                                public void handle(Signal.ReceiptReceived s) {
+                                    System.out.print(String.format("Receipt from: %s\nTimestamp: %s\n",
+                                            s.getSender(), formatTimestamp(s.getTimestamp())));
+                                }
+                            });
                         } catch (UnsatisfiedLinkError e) {
                             System.err.println("Missing native library dependency for dbus service: " + e.getMessage());
                             return 1;
@@ -1005,13 +1012,10 @@ public class Main {
                         }
                         if (syncMessage.getVerified().isPresent()) {
                             System.out.println("Received sync message with verified identities:");
-                            final List<VerifiedMessage> verifiedList = syncMessage.getVerified().get();
-                            for (VerifiedMessage v : verifiedList) {
-                                System.out.println(" - " + v.getDestination() + ": " + v.getVerified());
-                                String safetyNumber = formatSafetyNumber(m.computeSafetyNumber(v.getDestination(), v.getIdentityKey()));
-                                System.out.println("   " + safetyNumber);
-                            }
-
+                            final VerifiedMessage verifiedMessage = syncMessage.getVerified().get();
+                            System.out.println(" - " + verifiedMessage.getDestination() + ": " + verifiedMessage.getVerified());
+                            String safetyNumber = formatSafetyNumber(m.computeSafetyNumber(verifiedMessage.getDestination(), verifiedMessage.getIdentityKey()));
+                            System.out.println("   " + safetyNumber);
                         }
                     }
                 }
@@ -1098,7 +1102,17 @@ public class Main {
         public void handleMessage(SignalServiceEnvelope envelope, SignalServiceContent content, Throwable exception) {
             super.handleMessage(envelope, content, exception);
 
-            if (!envelope.isReceipt() && content != null && content.getDataMessage().isPresent()) {
+            if (envelope.isReceipt()) {
+                try {
+                    conn.sendSignal(new Signal.ReceiptReceived(
+                            SIGNAL_OBJECTPATH,
+                            envelope.getTimestamp(),
+                            envelope.getSource()
+                    ));
+                } catch (DBusException e) {
+                    e.printStackTrace();
+                }
+            } else if (content != null && content.getDataMessage().isPresent()) {
                 SignalServiceDataMessage message = content.getDataMessage().get();
 
                 if (!message.isEndSession() &&
