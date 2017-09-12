@@ -18,7 +18,10 @@ package org.asamk.signal;
 
 import com.fasterxml.jackson.annotation.JsonAutoDetect;
 import com.fasterxml.jackson.annotation.PropertyAccessor;
-import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonInclude.Include;
+import com.fasterxml.jackson.core.*;
+import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -51,6 +54,8 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.StringWriter;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.Charset;
@@ -80,6 +85,216 @@ public class Main {
         int res = handleCommands(ns);
         System.exit(res);
     }
+
+
+    //
+    //	Handles incoming json requests (called from JsonStdinReader in stdin reader thread)
+    //
+    private static class JsonRequestHandler {
+        private Manager m;
+        private Signal ts;
+        private ObjectMapper mpr;
+
+        //
+        // request-type:send 
+        // Send Signal message to recipient number or groupId
+        //
+        int sendMessage( JsonRequest req) {
+            if (!this.m.isRegistered()) {
+                new JsonErrorMessage( "USER_NOT_REGISTERED", "User is not registered", null, req).emit();
+                return 1;
+            }
+
+            // TODO: figure out what "endsession" means and if it is something we need to implement in jsonevtloop(?)
+            // if (ns.getBoolean("endsession")) {
+            //     if (ns.getList("recipient") == null) {
+            //         System.err.println("No recipients given");
+            //         System.err.println("Aborting sending.");
+            //         return 1;
+            //     }
+            //     try {
+            //         ts.sendEndSessionMessage(ns.<String>getList("recipient"));
+            //     } catch (IOException e) {
+            //         handleIOException(e);
+            //         return 3;
+            //     } catch (EncapsulatedExceptions e) {
+            //         handleEncapsulatedExceptions(e);
+            //         return 3;
+            //     } catch (AssertionError e) {
+            //         handleAssertionError(e);
+            //         return 1;
+            //     } catch (DBusExecutionException e) {
+            //         handleDBusExecutionException(e);
+            //         return 1;
+            //     }
+            // } else {
+
+            try {
+                List<String> attachments = new ArrayList<String>();
+                if( req.attachmentFilenames != null) {
+                    attachments = req.attachmentFilenames;
+                }
+
+                if( req.recipientGroupId != null && !req.recipientGroupId.equals("")) {
+
+                    byte[] groupId = decodeGroupId(req.recipientGroupId);
+                	ts.sendGroupMessage( req.messageBody, attachments, groupId);
+                } else {
+	                ts.sendMessage( req.messageBody, attachments, req.recipientNumber);
+                }
+            } catch (IOException e) {
+                //handleIOException(e);
+                new JsonErrorMessage( "SEND_ERROR_IO_EXCEPTION", "Failed to send message: IO Exception: " + e.getMessage(), null, req).emit();
+                return 3;
+            } catch (EncapsulatedExceptions e) {
+                for (NetworkFailureException n : e.getNetworkExceptions()) {
+                    new JsonErrorMessage( "SEND_ERROR_NETWORK_FAILURE", "Failed to send message: Network failure for '" + n.getE164number() + "': " + n.getMessage(), n.getE164number(), req).emit();
+                }
+                for (UnregisteredUserException n : e.getUnregisteredUserExceptions()) {
+                    new JsonErrorMessage( "SEND_ERROR_UNREGISTERED_USER", "Failed to send message: Unregistered user '" + n.getE164Number() + "': " + n.getMessage(), n.getE164Number(), req).emit();
+                }
+                for (UntrustedIdentityException n : e.getUntrustedIdentityExceptions()) {
+                    new JsonErrorMessage( "SEND_ERROR_UNTRUSTED_IDENTITY", "Failed to send message: Untrusted identity for '" + n.getE164Number() + "': " + n.getMessage(), n.getE164Number(), req).emit();
+                }
+
+                return 3;
+            } catch (AssertionError e) {
+                new JsonErrorMessage( "SEND_ERROR", "Failed to send message(AssertionError): " + e.toString(), req.recipientNumber, req).emit();
+                return 1;
+            } catch (GroupNotFoundException e) {
+                new JsonErrorMessage( "SEND_ERROR_GROUP_NOT_FOUND", "Failed to send message(GroupNotFoundException): " + e.toString(), req.recipientNumber, req).emit();
+                return 1;
+            } catch (NotAGroupMemberException e) {
+                new JsonErrorMessage( "SEND_ERROR_NOT_A_GROUP_MEMBER", "Failed to send message(NotAGroupMemberException): " + e.toString(), req.recipientNumber, req).emit();
+                return 1;
+            } catch (AttachmentInvalidException e) {
+                new JsonErrorMessage( "SEND_ERROR_FAILED_TO_ADD_ATTACHMENT", "Failed to add attachment: " + e.toString(), req.recipientNumber, req).emit();
+                return 1;
+            }
+            new JsonStatusReport("result", req.id, "ok").emit();
+            return 0;
+        }
+
+        // Parse JSON and dispatch actions
+        void handle( String line) {
+            //sendMessage(line);
+            JsonRequest req;
+            try {
+                req = this.mpr.readValue( line, JsonRequest.class);
+            } catch( JsonGenerationException e) {
+                System.err.println("ERROR: JsonRequestHandler: Failed to parse json (JsonGenerationException): " + e.toString());
+                System.err.println("+-- Original request text: " + line);
+                return;
+            } catch( JsonMappingException e) {
+                System.err.println("ERROR: JsonRequestHandler: Failed to parse json (JsonMappingException): " + e.toString());
+                System.err.println("+-- Original request text: " + line);
+                return;
+            } catch( Exception e) {
+            	System.err.println("ERROR: JsonRequestHandler: Failed to parse json (generic exception): " + e.toString());
+                System.err.println("+-- Original request text: " + line);
+            	return;
+            }
+            switch( req.type) {
+                case "send":
+                    sendMessage(req);
+                    break;
+                case "exit":
+                    System.err.println("signal-cli: Exiting event loop on exit request");
+                    new JsonStatusReport("jsonevtloop_exit", req.id, null).emit();
+                    System.exit(0);
+                    break;
+                case "alive_req":
+                    new JsonStatusReport( "jsonevtloop_alive", req.id, null).emit();
+                default:
+                    System.err.println("ERROR: Unknown JsonRequest type '" + req.type + "'");
+            }
+        }
+
+        JsonRequestHandler( Manager m, Signal ts) {
+            this.m = m;
+            this.ts = ts;
+            this.mpr = new ObjectMapper();
+        }
+    }
+
+    //
+    // Thread to handle reading STDIN line-by-line and passing to JsonRequestHandler
+    //
+    private static class JsonStdinReader implements Runnable {
+        JsonRequestHandler jsonRequestHandler = null;
+
+        public void run() {
+            BufferedReader br = new BufferedReader( new InputStreamReader( System.in));
+            while( true) {
+                String line=null;
+                try {
+                    line = br.readLine();
+                } catch( IOException e) {
+                    System.err.println("ERROR Reading stdin: " + e.toString() + ", exiting");
+                    System.exit(1);
+                }
+                if( line != null && !line.equals(""))
+                    this.jsonRequestHandler.handle(line);
+            }
+        }
+
+        JsonStdinReader( JsonRequestHandler j) {
+            this.jsonRequestHandler = j;
+        }
+    }
+
+
+    //
+    //	Start json event loop mode
+    //
+    //  General idea is to provide lightweight asynchronous API for scripting languages
+    //
+    // 	Main thread starts signal receiveMessages and receives all incoming messages and emits json blobs to stdout (line buffered (one line - one json blob))
+    //	New thread starts and reads commands from stdin formatted as json requests (also line buffered) (JsonRequestHandler)
+    // 	Errors goes to stderr
+    //
+    private static int JsonEvtLoop( Namespace ns, Manager m, Signal ts) {
+        if (!m.isRegistered()) {
+            new JsonErrorMessage( "USER_NOT_REGISTERED", "User is not registered, please use signal-cli register/verify from commandline", null).emit();
+            return 1;
+        }
+
+        // Start stdin reader thread
+        JsonRequestHandler jhandler = new JsonRequestHandler( m, ts);
+        JsonStdinReader reader = new JsonStdinReader( jhandler);
+        Thread jsonStdinReaderThread = new Thread( reader);
+        jsonStdinReaderThread.start();
+
+        Boolean exitNow = false;
+
+        new JsonStatusReport( "jsonevtloop_start", null, null).emit();
+        while( !exitNow) {
+        	new JsonStatusReport( "jsonevtloop_alive", null, null).emit();
+            double timeout = 3600;
+            if (ns.getDouble("timeout") != null) {
+                timeout = ns.getDouble("timeout");
+            }
+            boolean returnOnTimeout = true;
+            if (timeout < 0) {
+                returnOnTimeout = false;
+                timeout = 3600;
+            }
+            boolean ignoreAttachments = false;
+            if( ns.getBoolean("ignore_attachments") != null) {
+                ignoreAttachments = ns.getBoolean("ignore_attachments");
+            }
+            try {
+                m.receiveMessages((long) (timeout * 1000), TimeUnit.MILLISECONDS, returnOnTimeout, ignoreAttachments, new JsonReceiveMessageHandler(m));
+            } catch (IOException e) {
+                new JsonErrorMessage( "IO_EXCEPTION_RECEIVING", "IO Exception while receiving messages: " + e.getMessage(), null).emit();
+            } catch (AssertionError e) {
+                handleAssertionError(e);
+            }
+        }
+
+        return 0;
+    }
+
 
     private static int handleCommands(Namespace ns) {
         final String username = ns.getString("username");
@@ -127,6 +342,9 @@ public class Main {
                 if (m.userExists()) {
                     try {
                         m.init();
+                    } catch (org.whispersystems.signalservice.api.push.exceptions.AuthorizationFailedException e) {
+                        // We should not continue after this, methinks...?
+                        return 2;
                     } catch (Exception e) {
                         System.err.println("Error loading state file \"" + m.getFileName() + "\": " + e.getMessage());
                         return 2;
@@ -135,6 +353,11 @@ public class Main {
             }
 
             switch (ns.getString("command")) {
+
+                case "jsonevtloop":
+                    int r = JsonEvtLoop( ns, m, ts);
+                    break;
+
                 case "register":
                     if (dBusConn != null) {
                         System.err.println("register is not yet implemented via dbus");
@@ -758,6 +981,9 @@ public class Main {
 
         Subparser parserDevices = subparsers.addParser("listDevices");
 
+        // KBIN
+        Subparser parserJSONevtLoop = subparsers.addParser("jsonevtloop");
+
         Subparser parserRemoveDevice = subparsers.addParser("removeDevice");
         parserRemoveDevice.addArgument("-d", "--deviceId")
                 .type(int.class)
@@ -1161,9 +1387,11 @@ public class Main {
             ObjectNode result = jsonProcessor.createObjectNode();
             if (exception != null) {
                 result.putPOJO("error", new JsonError(exception));
+                result.put("type", "error_exception");
             }
             if (envelope != null) {
-                result.putPOJO("envelope", new JsonMessageEnvelope(envelope, content));
+                result.putPOJO("envelope", new JsonMessageEnvelope(envelope, content, this.m));
+                result.put("type", "message");
             }
             try {
                 jsonProcessor.writeValue(System.out, result);
@@ -1180,4 +1408,12 @@ public class Main {
         df.setTimeZone(tzUTC);
         return timestamp + " (" + df.format(date) + ")";
     }
+
+    private static String formatTimestampISO(long timestamp) {
+        Date date = new Date(timestamp);
+        final DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"); // Quoted "Z" to indicate UTC, no timezone offset
+        df.setTimeZone(tzUTC);
+        return df.format(date);
+    }
+
 }
