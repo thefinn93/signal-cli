@@ -93,11 +93,10 @@ public class Main {
     //
     private static class JsonRequestHandler {
 
-        private final ObjectMapper jsonProcessor = new ObjectMapper();
-
         private Manager m;
         private Signal ts;
         private ObjectMapper mpr;
+        private ObjectMapper jsonProcessor;
 
         //
         // request-type:send
@@ -208,12 +207,12 @@ public class Main {
                     System.exit(0);
                     break;
                 case "list_groups":
-                    ObjectNode result = jsonProcessor.createObjectNode();
+                    ObjectNode result = this.jsonProcessor.createObjectNode();
                     List<GroupInfo> groups = m.getGroups();
                     ArrayNode array = result.putArray("groups");
                     result.put("type", "group_list");
                     for (GroupInfo group : groups) {
-                        ObjectNode groupObject = jsonProcessor.createObjectNode();
+                        ObjectNode groupObject = this.jsonProcessor.createObjectNode();
                         groupObject.put("name", group.name);
                         groupObject.put("group_id", group.groupId);
                         ArrayNode members = groupObject.putArray("members");
@@ -223,7 +222,7 @@ public class Main {
                         array.add(groupObject);
                     }
                     try {
-                        jsonProcessor.writeValue(System.out, result);
+                        this.jsonProcessor.writeValue(System.out, result);
                         System.out.println();
                     } catch (IOException e) {
                         e.printStackTrace();
@@ -240,6 +239,11 @@ public class Main {
             this.m = m;
             this.ts = ts;
             this.mpr = new ObjectMapper();
+            this.jsonProcessor = new ObjectMapper();
+            this.jsonProcessor.setVisibility(PropertyAccessor.ALL, JsonAutoDetect.Visibility.ANY); // disable autodetect
+            this.jsonProcessor.enable(SerializationFeature.WRITE_NULL_MAP_VALUES);
+            this.jsonProcessor.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+            this.jsonProcessor.disable(JsonGenerator.Feature.AUTO_CLOSE_TARGET);
         }
     }
 
