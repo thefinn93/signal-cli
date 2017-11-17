@@ -26,6 +26,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import net.sourceforge.argparse4j.ArgumentParsers;
 import net.sourceforge.argparse4j.impl.Arguments;
 import net.sourceforge.argparse4j.inf.*;
@@ -91,12 +92,15 @@ public class Main {
     //	Handles incoming json requests (called from JsonStdinReader in stdin reader thread)
     //
     private static class JsonRequestHandler {
+
+        private final ObjectMapper jsonProcessor = new ObjectMapper();
+
         private Manager m;
         private Signal ts;
         private ObjectMapper mpr;
 
         //
-        // request-type:send 
+        // request-type:send
         // Send Signal message to recipient number or groupId
         //
         int sendMessage( JsonRequest req) {
@@ -202,6 +206,28 @@ public class Main {
                     System.err.println("signal-cli: Exiting event loop on exit request");
                     new JsonStatusReport("jsonevtloop_exit", req.id, null).emit();
                     System.exit(0);
+                    break;
+                case "list_groups":
+                    ObjectNode result = jsonProcessor.createObjectNode();
+                    List<GroupInfo> groups = m.getGroups();
+                    ArrayNode array = result.putArray("groups");
+                    result.put("type", "group_list");
+                    for (GroupInfo group : groups) {
+                        ObjectNode groupObject = jsonProcessor.createObjectNode();
+                        groupObject.put("name", group.name);
+                        groupObject.put("group_id", group.groupId);
+                        ArrayNode members = groupObject.putArray("members");
+                        for (String member :  group.members) {
+                            members.add(member);
+                        }
+                        array.add(groupObject);
+                    }
+                    try {
+                        jsonProcessor.writeValue(System.out, result);
+                        System.out.println();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
                     break;
                 case "alive_req":
                     new JsonStatusReport( "jsonevtloop_alive", req.id, null).emit();
