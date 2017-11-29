@@ -178,6 +178,38 @@ public class Main {
             return 0;
         }
 
+        void updateGroup(JsonRequest req) {
+            try {
+                byte[] groupId = decodeGroupId(req.groupId);
+
+                String name = "";
+                if(req.name != null) {
+                  name = req.name;
+                }
+
+                String avatar = "";
+                if(req.avatar != null) {
+                    avatar = req.avatar;
+                }
+
+              List<String> members = new ArrayList<String>();
+                if(req.members != null) {
+                    members = req.members;
+                }
+
+                System.err.println("Adding " + members + " to group " + groupId);
+
+                ObjectNode result = this.jsonProcessor.createObjectNode();
+                byte[] newGroupId = this.ts.updateGroup(groupId, name, members, avatar);
+                this.jsonProcessor.writeValue(System.out, result);
+                System.out.println();
+            } catch (IOException e) {
+                e.printStackTrace();
+            } catch(EncapsulatedExceptions e) {
+                e.printStackTrace();
+            }
+        }
+
         // Parse JSON and dispatch actions
         void handle( String line) {
             //sendMessage(line);
@@ -201,6 +233,9 @@ public class Main {
                 case "send":
                     sendMessage(req);
                     break;
+                case "update_group":
+                  updateGroup(req);
+                  break;
                 case "exit":
                     System.err.println("signal-cli: Exiting event loop on exit request");
                     new JsonStatusReport("jsonevtloop_exit", req.id, null).emit();
